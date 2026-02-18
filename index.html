@@ -1036,6 +1036,7 @@
         }
     </style>
 <base target="_blank">
+<base target="_blank">
 </head>
 <body>
     <div class="particles" id="particles"></div>
@@ -1447,7 +1448,7 @@
                     <div class="media-container ${f.video ? 'has-video' : ''}">
                         ${f.video
                             ? `<video id="vid_${f.id}" src="${f.video}" muted loop autoplay playsinline preload="auto"></video>
-                               <button class="mute-btn" id="mute_${f.id}" onclick="toggleMute(${f.id},event)" title="Unmute">▶</button>`
+                               <button class="mute-btn" id="mute_${f.id}" onclick="toggleMute(${f.id},event)" title="Unmute">🔇</button>`
                             : f.thumb
                             ? `<img src="${f.thumb}" alt="">`
                             : '<div class="media-placeholder">◉</div>'}
@@ -1478,7 +1479,7 @@
             const btn = document.getElementById('mute_' + id);
             if (!vid) return;
             vid.muted = !vid.muted;
-            btn.textContent = vid.muted ? '▶' : '◼';
+            btn.textContent = vid.muted ? '🔇' : '🔊';
             btn.title = vid.muted ? 'Unmute' : 'Mute';
         }
 
