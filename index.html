@@ -1397,18 +1397,7 @@ let currentDownload = null;
                     document.getElementById('adminBtn').classList.remove('active');
                     document.body.classList.remove('admin-mode');
                     document.body.classList.remove('admin-exiting');
-                    // Initialize IndexedDB and load saved files
-        initDB().then(() => {
-            loadFilesFromDB().then(() => {
-                renderFiles();
-            }).catch(e => {
-                console.error('Failed to load files:', e);
-                renderFiles();
-            });
-        }).catch(e => {
-            console.error('Failed to init DB:', e);
-            renderFiles();
-        });
+                    renderFiles();
                 }, 300);
 
                 cortanaSpeak("Admin logged out");
@@ -1552,8 +1541,6 @@ let currentDownload = null;
                 btn.textContent = 'Initialize Upload';
                 btn.disabled = false;
                 cortanaSpeak("Upload complete!");
-                // Save to localStorage for persistence
-                await saveFilesToStorage();
             }).catch(() => {
                 cortanaSpeak("Upload failed!");
                 btn.textContent = 'Initialize Upload';
@@ -1627,13 +1614,13 @@ let currentDownload = null;
             btn.title = vid.muted ? 'Unmute' : 'Mute';
         }
 
-        function deleteFile(id) {
+        async function deleteFile(id) {
             if (confirm('Delete this file?')) {
                 // Animate card out first
                 const card = document.querySelector(`[onclick="deleteFile(${id})"]`)?.closest('.file-card');
                 if (card) {
                     card.classList.add('removing');
-                    setTimeout(() => {
+                    setTimeout(async () => {
                         const fileToDelete = files.find(f => f.id === id);
                         // Clean up blob URLs
                         if (fileToDelete.video) URL.revokeObjectURL(fileToDelete.video);
@@ -1654,10 +1641,14 @@ let currentDownload = null;
                     }, 370);
                 } else {
                     files = files.filter(f => f.id !== id);
+                    // Delete from IndexedDB
+                    try {
+                        await deleteFileFromDB(id);
+                    } catch (e) {
+                        console.error('Failed to delete from IndexedDB:', e);
+                    }
                     renderFiles();
                     cortanaSpeak("File deleted");
-                    // Save changes to localStorage
-                    saveFilesToStorage();
                 }
             }
         }
@@ -1841,6 +1832,20 @@ let currentDownload = null;
         loadSettings();
 
         renderFiles();
+    
+        // Initialize IndexedDB and load saved files on startup
+        initDB().then(() => {
+            loadFilesFromDB().then(() => {
+                renderFiles();
+            }).catch(e => {
+                console.error('Failed to load files:', e);
+                renderFiles();
+            });
+        }).catch(e => {
+            console.error('Failed to init DB:', e);
+            renderFiles();
+        });
+    
     </script>
 </body>
 </html>
