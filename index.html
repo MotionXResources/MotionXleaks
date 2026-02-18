@@ -1036,6 +1036,11 @@
         }
     </style>
 <base target="_blank">
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <!-- Firebase SDK for shared storage -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
 <base target="_blank">
 </head>
 <body>
@@ -1181,6 +1186,121 @@
     <script>
         let isAdmin = false;
         let files = [];
+        // ==========================================
+        // FIREBASE SHARED STORAGE CONFIGURATION
+        // ==========================================
+        // Replace with your own Firebase config from Firebase Console
+        const firebaseConfig = {
+            apiKey: "AIzaSyDemo-ReplaceWithYourOwn",
+            authDomain: "motionx-demo.firebaseapp.com",
+            databaseURL: "https://motionx-demo-default-rtdb.firebaseio.com",
+            projectId: "motionx-demo",
+            storageBucket: "motionx-demo.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:abcdef123456"
+        };
+
+        let firebaseApp = null;
+        let firebaseDB = null;
+
+        function initFirebase() {
+            try {
+                if (typeof firebase === 'undefined') {
+                    console.log('Firebase SDK not loaded');
+                    return false;
+                }
+                if (firebaseConfig.apiKey.includes('Demo')) {
+                    console.log('Firebase not configured - using local storage only');
+                    return false;
+                }
+                firebaseApp = firebase.initializeApp(firebaseConfig);
+                firebaseDB = firebase.database();
+                console.log('Firebase initialized');
+                return true;
+            } catch (e) {
+                console.error('Firebase init failed:', e);
+                return false;
+            }
+        }
+
+        async function loadFilesFromFirebase() {
+            if (!firebaseDB) return;
+            try {
+                const snapshot = await firebaseDB.ref('files').once('value');
+                const sharedFiles = snapshot.val();
+                if (sharedFiles) {
+                    Object.values(sharedFiles).forEach(f => {
+                        if (!files.find(existing => existing.id === f.id)) {
+                            if (f.videoData) f.video = base64ToBlob(f.videoData, 'video/mp4');
+                            if (f.thumbData) f.thumb = base64ToBlob(f.thumbData, 'image/jpeg');
+                            if (f.fileData) f.blobUrl = base64ToBlob(f.fileData, 'application/octet-stream');
+                            files.push(f);
+                        }
+                    });
+                }
+            } catch (e) {
+                console.error('Firebase load failed:', e);
+            }
+        }
+
+        async function saveFileToFirebase(fileData) {
+            if (!firebaseDB) return;
+            try {
+                const data = { ...fileData };
+                if (data.video) data.videoData = await blobToBase64(data.video);
+                if (data.thumb) data.thumbData = await blobToBase64(data.thumb);
+                if (data.blobUrl) data.fileData = await blobToBase64(data.blobUrl);
+                delete data.video; delete data.thumb; delete data.blobUrl;
+                await firebaseDB.ref('files/' + data.id).set(data);
+            } catch (e) {
+                console.error('Firebase save failed:', e);
+            }
+        }
+
+        async function deleteFileFromFirebase(id) {
+            if (!firebaseDB) return;
+            try {
+                await firebaseDB.ref('files/' + id).remove();
+            } catch (e) {
+                console.error('Firebase delete failed:', e);
+            }
+        }
+
+        async function blobToBase64(url) {
+            const res = await fetch(url);
+            const blob = await res.blob();
+            return new Promise(resolve => {
+                const r = new FileReader();
+                r.onloadend = () => resolve(r.result);
+                r.readAsDataURL(blob);
+            });
+        }
+
+        function base64ToBlob(base64, type) {
+            try {
+                const b = atob(base64.split(',')[1]);
+                const ab = new ArrayBuffer(b.length);
+                const ia = new Uint8Array(ab);
+                for (let i = 0; i < b.length; i++) ia[i] = b.charCodeAt(i);
+                return URL.createObjectURL(new Blob([ab], { type }));
+            } catch (e) { return null; }
+        }
+
+        function setupFirebaseListener() {
+            if (!firebaseDB) return;
+            firebaseDB.ref('files').on('child_added', snap => {
+                const f = snap.val();
+                if (!files.find(x => x.id === f.id)) {
+                    if (f.videoData) f.video = base64ToBlob(f.videoData, 'video/mp4');
+                    if (f.thumbData) f.thumb = base64ToBlob(f.thumbData, 'image/jpeg');
+                    if (f.fileData) f.blobUrl = base64ToBlob(f.fileData, 'application/octet-stream');
+                    files.push(f);
+                    renderFiles();
+                    cortanaSpeak("New shared file received");
+                }
+            });
+        }
+
 
         // IndexedDB Database for file persistence
         const DB_NAME = 'MotionXFilesDB';
@@ -1541,6 +1661,9 @@ let currentDownload = null;
                 btn.textContent = 'Initialize Upload';
                 btn.disabled = false;
                 cortanaSpeak("Upload complete!");
+
+                // Save to Firebase for sharing with other users
+                saveFileToFirebase(fileData);
             }).catch(() => {
                 cortanaSpeak("Upload failed!");
                 btn.textContent = 'Initialize Upload';
@@ -1629,12 +1752,13 @@ let currentDownload = null;
 
                         files = files.filter(f => f.id !== id);
 
-                        // Delete from IndexedDB
+                        // Delete from IndexedDB and Firebase
                         try {
                             await deleteFileFromDB(id);
                         } catch (e) {
                             console.error('Failed to delete from IndexedDB:', e);
                         }
+                        deleteFileFromFirebase(id);
 
                         renderFiles();
                         cortanaSpeak("File deleted");
@@ -1833,18 +1957,213 @@ let currentDownload = null;
 
         renderFiles();
     
-        // Initialize IndexedDB and load saved files on startup
-        initDB().then(() => {
-            loadFilesFromDB().then(() => {
-                renderFiles();
-            }).catch(e => {
-                console.error('Failed to load files:', e);
+        
+        // Firebase Configuration - Replace with your own Firebase project config
+        // Get this from Firebase Console > Project Settings > Your apps > Web app
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyD5_YL5T3dGNBJqt79yW3QUczNbcLVohYE",
+  authDomain: "motionx-6e1ea.firebaseapp.com",
+  projectId: "motionx-6e1ea",
+  storageBucket: "motionx-6e1ea.firebasestorage.app",
+  messagingSenderId: "234403932982",
+  appId: "1:234403932982:web:231753510263a390f02197",
+  measurementId: "G-SBNRC6X87J"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+        // Initialize Firebase (if config is valid)
+        let firebaseApp = null;
+        let firebaseDB = null;
+
+        function initFirebase() {
+            try {
+                if (firebaseConfig.apiKey.includes('Demo')) {
+                    console.log('Firebase not configured - using local storage only');
+                    return false;
+                }
+                firebaseApp = firebase.initializeApp(firebaseConfig);
+                firebaseDB = firebase.database();
+                console.log('Firebase initialized successfully');
+                return true;
+            } catch (e) {
+                console.error('Firebase init failed:', e);
+                return false;
+            }
+        }
+
+        // Load files from Firebase (shared across all users)
+        async function loadFilesFromFirebase() {
+            if (!firebaseDB) return false;
+
+            try {
+                const snapshot = await firebaseDB.ref('files').once('value');
+                const sharedFiles = snapshot.val();
+
+                if (sharedFiles) {
+                    // Convert object to array
+                    const filesArray = Object.values(sharedFiles);
+
+                    // Merge with local files (avoiding duplicates)
+                    filesArray.forEach(sharedFile => {
+                        if (!files.find(f => f.id === sharedFile.id)) {
+                            // Restore blob URLs from base64 if present
+                            if (sharedFile.videoData) {
+                                sharedFile.video = base64ToBlobUrl(sharedFile.videoData, 'video/mp4');
+                            }
+                            if (sharedFile.thumbData) {
+                                sharedFile.thumb = base64ToBlobUrl(sharedFile.thumbData, 'image/jpeg');
+                            }
+                            if (sharedFile.fileData) {
+                                sharedFile.blobUrl = base64ToBlobUrl(sharedFile.fileData, 'application/octet-stream');
+                            }
+                            files.push(sharedFile);
+                        }
+                    });
+
+                    renderFiles();
+                    console.log(`Loaded ${filesArray.length} shared files from Firebase`);
+                }
+                return true;
+            } catch (e) {
+                console.error('Failed to load from Firebase:', e);
+                return false;
+            }
+        }
+
+        // Save file to Firebase (share with all users)
+        async function saveFileToFirebase(fileData) {
+            if (!firebaseDB) return false;
+
+            try {
+                // Convert blobs to base64 for storage
+                const dataToSave = { ...fileData };
+
+                if (fileData.video && fileData.video.startsWith('blob:')) {
+                    dataToSave.videoData = await blobUrlToBase64(fileData.video);
+                }
+                if (fileData.thumb && fileData.thumb.startsWith('blob:')) {
+                    dataToSave.thumbData = await blobUrlToBase64(fileData.thumb);
+                }
+                if (fileData.blobUrl && fileData.blobUrl.startsWith('blob:')) {
+                    dataToSave.fileData = await blobUrlToBase64(fileData.blobUrl);
+                }
+
+                // Remove blob URLs (will be recreated on load)
+                delete dataToSave.video;
+                delete dataToSave.thumb;
+                delete dataToSave.blobUrl;
+
+                await firebaseDB.ref('files/' + fileData.id).set(dataToSave);
+                console.log('File saved to Firebase:', fileData.name);
+                return true;
+            } catch (e) {
+                console.error('Failed to save to Firebase:', e);
+                return false;
+            }
+        }
+
+        // Delete file from Firebase
+        async function deleteFileFromFirebase(id) {
+            if (!firebaseDB) return false;
+
+            try {
+                await firebaseDB.ref('files/' + id).remove();
+                console.log('File deleted from Firebase:', id);
+                return true;
+            } catch (e) {
+                console.error('Failed to delete from Firebase:', e);
+                return false;
+            }
+        }
+
+        // Helper: Convert blob URL to base64
+        async function blobUrlToBase64(url) {
+            const response = await fetch(url);
+            const blob = await response.blob();
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        // Helper: Convert base64 to blob URL
+        function base64ToBlobUrl(base64, type) {
+            try {
+                const byteString = atob(base64.split(',')[1]);
+                const ab = new ArrayBuffer(byteString.length);
+                const ia = new Uint8Array(ab);
+                for (let i = 0; i < byteString.length; i++) {
+                    ia[i] = byteString.charCodeAt(i);
+                }
+                return URL.createObjectURL(new Blob([ab], { type }));
+            } catch (e) {
+                console.error('Failed to convert base64 to blob:', e);
+                return null;
+            }
+        }
+
+        // Listen for real-time updates from other users
+        function setupRealtimeListener() {
+            if (!firebaseDB) return;
+
+            firebaseDB.ref('files').on('child_added', (snapshot) => {
+                const newFile = snapshot.val();
+                if (!files.find(f => f.id === newFile.id)) {
+                    // Restore blob URLs
+                    if (newFile.videoData) {
+                        newFile.video = base64ToBlobUrl(newFile.videoData, 'video/mp4');
+                    }
+                    if (newFile.thumbData) {
+                        newFile.thumb = base64ToBlobUrl(newFile.thumbData, 'image/jpeg');
+                    }
+                    if (newFile.fileData) {
+                        newFile.blobUrl = base64ToBlobUrl(newFile.fileData, 'application/octet-stream');
+                    }
+                    files.push(newFile);
+                    renderFiles();
+                    cortanaSpeak("New file shared by another user");
+                }
+            });
+
+            firebaseDB.ref('files').on('child_removed', (snapshot) => {
+                const removedId = snapshot.val().id;
+                files = files.filter(f => f.id !== removedId);
                 renderFiles();
             });
-        }).catch(e => {
-            console.error('Failed to init DB:', e);
+        }
+
+// Initialize storage systems
+        async function initStorage() {
+            // Try Firebase first for shared storage
+            const firebaseReady = initFirebase();
+            if (firebaseReady) {
+                await loadFilesFromFirebase();
+                setupRealtimeListener();
+            }
+
+            // Also init IndexedDB for local persistence
+            try {
+                await initDB();
+                await loadFilesFromDB();
+            } catch (e) {
+                console.log('IndexedDB not available');
+            }
+
             renderFiles();
-        });
+        }
+
+        initStorage();
     
     </script>
 </body>
