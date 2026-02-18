@@ -1181,7 +1181,125 @@
     <script>
         let isAdmin = false;
         let files = [];
-        let currentDownload = null;
+
+        // IndexedDB Database for file persistence
+        const DB_NAME = 'MotionXFilesDB';
+        const DB_VERSION = 1;
+        const STORE_NAME = 'files';
+        let db = null;
+
+        // Initialize IndexedDB
+        async function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+                request.onerror = () => reject(request.error);
+                request.onsuccess = () => {
+                    db = request.result;
+                    resolve(db);
+                };
+
+                request.onupgradeneeded = (event) => {
+                    const database = event.target.result;
+                    if (!database.objectStoreNames.contains(STORE_NAME)) {
+                        const store = database.createObjectStore(STORE_NAME, { keyPath: 'id' });
+                        store.createIndex('name', 'name', { unique: false });
+                    }
+                };
+            });
+        }
+
+        // Load files from IndexedDB
+        async function loadFilesFromDB() {
+            if (!db) await initDB();
+
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([STORE_NAME], 'readonly');
+                const store = transaction.objectStore(STORE_NAME);
+                const request = store.getAll();
+
+                request.onsuccess = () => {
+                    const storedFiles = request.result;
+                    // Restore blob URLs from stored blob data
+                    files = storedFiles.map(f => {
+                        if (f.videoBlob) {
+                            f.video = URL.createObjectURL(f.videoBlob);
+                        }
+                        if (f.thumbBlob) {
+                            f.thumb = URL.createObjectURL(f.thumbBlob);
+                        }
+                        if (f.mainBlob) {
+                            f.blobUrl = URL.createObjectURL(f.mainBlob);
+                        }
+                        return f;
+                    });
+                    resolve(files);
+                };
+
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        // Save file to IndexedDB
+        async function saveFileToDB(fileData) {
+            if (!db) await initDB();
+
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([STORE_NAME], 'readwrite');
+                const store = transaction.objectStore(STORE_NAME);
+
+                // Store the blob data directly
+                const fileToStore = {
+                    ...fileData,
+                    videoBlob: fileData.video ? fileData._videoBlob : null,
+                    thumbBlob: fileData.thumb ? fileData._thumbBlob : null,
+                    mainBlob: fileData.blobUrl ? fileData._mainBlob : null
+                };
+
+                // Remove temporary blob storage properties
+                delete fileToStore._videoBlob;
+                delete fileToStore._thumbBlob;
+                delete fileToStore._mainBlob;
+                delete fileToStore.video;  // Will be recreated from blob
+                delete fileToStore.thumb;
+                delete fileToStore.blobUrl;
+
+                const request = store.put(fileToStore);
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        // Delete file from IndexedDB
+        async function deleteFileFromDB(id) {
+            if (!db) await initDB();
+
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([STORE_NAME], 'readwrite');
+                const store = transaction.objectStore(STORE_NAME);
+                const request = store.delete(id);
+
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        // Convert blob to array buffer for storage
+        async function blobToArrayBuffer(blob) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.readAsArrayBuffer(blob);
+            });
+        }
+
+        // Fetch blob from URL
+        async function urlToBlob(url) {
+            const response = await fetch(url);
+            return response.blob();
+        }
+
+let currentDownload = null;
         let clickCount = 0;
 
         const ADMIN_PASS = "mtxadmin@";
@@ -1279,7 +1397,18 @@
                     document.getElementById('adminBtn').classList.remove('active');
                     document.body.classList.remove('admin-mode');
                     document.body.classList.remove('admin-exiting');
-                    renderFiles();
+                    // Initialize IndexedDB and load saved files
+        initDB().then(() => {
+            loadFilesFromDB().then(() => {
+                renderFiles();
+            }).catch(e => {
+                console.error('Failed to load files:', e);
+                renderFiles();
+            });
+        }).catch(e => {
+            console.error('Failed to init DB:', e);
+            renderFiles();
+        });
                 }, 300);
 
                 cortanaSpeak("Admin logged out");
@@ -1394,8 +1523,21 @@
                 }));
             }
 
-            Promise.all(readers).then(() => {
+            Promise.all(readers).then(async () => {
+                // Store blobs for IndexedDB persistence
+                if (video) fileData._videoBlob = video;
+                if (thumb) fileData._thumbBlob = thumb;
+                fileData._mainBlob = mainFile;
+
                 files.push(fileData);
+
+                // Save to IndexedDB for persistence
+                try {
+                    await saveFileToDB(fileData);
+                } catch (e) {
+                    console.error('Failed to save to IndexedDB:', e);
+                }
+
                 renderFiles();
                 document.getElementById('uploadForm').reset();
                 document.querySelectorAll('.file-drop-zone').forEach(z => z.classList.remove('has-file'));
@@ -1410,6 +1552,8 @@
                 btn.textContent = 'Initialize Upload';
                 btn.disabled = false;
                 cortanaSpeak("Upload complete!");
+                // Save to localStorage for persistence
+                await saveFilesToStorage();
             }).catch(() => {
                 cortanaSpeak("Upload failed!");
                 btn.textContent = 'Initialize Upload';
@@ -1490,7 +1634,21 @@
                 if (card) {
                     card.classList.add('removing');
                     setTimeout(() => {
+                        const fileToDelete = files.find(f => f.id === id);
+                        // Clean up blob URLs
+                        if (fileToDelete.video) URL.revokeObjectURL(fileToDelete.video);
+                        if (fileToDelete.thumb) URL.revokeObjectURL(fileToDelete.thumb);
+                        if (fileToDelete.blobUrl) URL.revokeObjectURL(fileToDelete.blobUrl);
+
                         files = files.filter(f => f.id !== id);
+
+                        // Delete from IndexedDB
+                        try {
+                            await deleteFileFromDB(id);
+                        } catch (e) {
+                            console.error('Failed to delete from IndexedDB:', e);
+                        }
+
                         renderFiles();
                         cortanaSpeak("File deleted");
                     }, 370);
@@ -1498,6 +1656,8 @@
                     files = files.filter(f => f.id !== id);
                     renderFiles();
                     cortanaSpeak("File deleted");
+                    // Save changes to localStorage
+                    saveFilesToStorage();
                 }
             }
         }
