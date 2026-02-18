@@ -200,21 +200,24 @@
         /* Upload */
         .upload-section {
             margin-bottom: 4rem;
-            overflow: hidden;
-            max-height: 0;
             opacity: 0;
-            transform: translateY(-10px);
+            transform: translateY(-14px);
             pointer-events: none;
-            transition: max-height 0.5s cubic-bezier(0.22,1,0.36,1),
-                        opacity 0.4s cubic-bezier(0.22,1,0.36,1),
-                        transform 0.4s cubic-bezier(0.22,1,0.36,1);
+            visibility: hidden;
+            transition: opacity 0.38s cubic-bezier(0.22,1,0.36,1),
+                        transform 0.38s cubic-bezier(0.22,1,0.36,1),
+                        visibility 0s linear 0.38s;
             will-change: opacity, transform;
         }
         .upload-section.active {
-            max-height: 800px;
             opacity: 1;
             transform: translateY(0);
             pointer-events: all;
+            visibility: visible;
+            transition: opacity 0.38s cubic-bezier(0.22,1,0.36,1),
+                        transform 0.38s cubic-bezier(0.22,1,0.36,1),
+                        visibility 0s linear 0s;
+            margin-bottom: 4rem;
         }
 
         .upload-header {
@@ -411,25 +414,26 @@
             position: relative;
             overflow: hidden;
             opacity: 0;
-            transform: translateY(16px) translateZ(0);
+            transform: translateY(14px);
             will-change: transform, opacity;
             backface-visibility: hidden;
-            transition: background 0.3s, transform 0.4s cubic-bezier(0.22,1,0.36,1), box-shadow 0.4s;
+            transition: opacity 0.38s cubic-bezier(0.22,1,0.36,1),
+                        transform 0.38s cubic-bezier(0.22,1,0.36,1),
+                        background 0.3s ease,
+                        box-shadow 0.35s ease;
         }
 
         .file-card.visible {
-            animation: cardIn 0.55s cubic-bezier(0.22,1,0.36,1) forwards;
+            opacity: 1;
+            transform: translateY(0);
         }
+
         .file-card.removing {
             pointer-events: none;
             opacity: 0 !important;
-            transform: translateY(-10px) scale(0.97) translateZ(0) !important;
-            transition: opacity 0.3s cubic-bezier(0.4,0,0.2,1),
-                        transform 0.3s cubic-bezier(0.4,0,0.2,1) !important;
-        }
-
-        @keyframes cardIn {
-            to { opacity: 1; transform: translateY(0) translateZ(0); }
+            transform: translateY(-10px) scale(0.97) !important;
+            transition: opacity 0.26s cubic-bezier(0.4,0,1,1) !important,
+                        transform 0.26s cubic-bezier(0.4,0,1,1) !important;
         }
 
         .file-card:hover {
@@ -708,10 +712,11 @@
             border-radius: 6px;
             box-shadow: 0 40px 80px rgba(0,0,0,0.8);
             opacity: 0;
-            transform: translateY(18px) scale(0.97);
-            transition: opacity 0.38s cubic-bezier(0.22,1,0.36,1),
-                        transform 0.38s cubic-bezier(0.22,1,0.36,1);
+            transform: translateY(16px) scale(0.97);
+            transition: opacity 0.32s cubic-bezier(0.22,1,0.36,1),
+                        transform 0.32s cubic-bezier(0.22,1,0.36,1);
             will-change: transform, opacity;
+            backface-visibility: hidden;
         }
 
         .modal.active .modal-content {
@@ -1149,11 +1154,14 @@
                 </div>
             `).join('');
 
-            requestAnimationFrame(() => {
-                grid.querySelectorAll('.file-card').forEach((card, i) => {
-                    setTimeout(() => card.classList.add('visible'), i * 70);
-                });
+            const cards = grid.querySelectorAll('.file-card');
+            cards.forEach((card, i) => {
+                card.style.transitionDelay = (i * 50) + 'ms';
             });
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                cards.forEach(card => card.classList.add('visible'));
+                setTimeout(() => cards.forEach(card => card.style.transitionDelay = ''), cards.length * 50 + 420);
+            }));
         }
 
         function toggleMute(id, e) {
